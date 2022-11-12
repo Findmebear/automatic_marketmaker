@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.9;
+pragma solidity >=0.7.0 <0.9.0;
 
 // Uncomment this line to use console.log
-// import "hardhat/console.sol";
+import "hardhat/console.sol";
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 
 contract Exchange {
 
@@ -16,7 +18,11 @@ contract Exchange {
 
     event SwapForERC20Token(uint amountERC20TokenWithdrew, uint amountEthDeposited);
 
-    IERC20 public immutable token;
+    IERC20 public token;
+
+    uint public balance_address;
+
+    uint public balance_token;
     
     address TOKEN_ADDRESS;
     
@@ -28,6 +34,8 @@ contract Exchange {
         owner = payable(msg.sender);
         TOKEN_ADDRESS = token_address;
         token = IERC20(token_address);
+        balance_address = address(this).balance;
+        balance_token = token.balanceOf(address(this));
     }
 
     uint totalLiquidityPositions; // total number of liquidity positions
@@ -36,10 +44,13 @@ contract Exchange {
     mapping (address => uint) public liquidityPositions;
 
 
-    function provideLiquidity(uint _amountERC20Token) payable public returns (uint) {
+    function provideLiquidity(uint _amountERC20Token) public payable returns (uint) {
 
         token.transferFrom(msg.sender, address(this), _amountERC20Token); // transfer ERC20 token to this contract
         owner.transfer(msg.value); // transfer the ETH to the contract
+
+        balance_address = address(this).balance;
+        balance_token = token.balanceOf(address(this));
         
         uint currentLiquidityPositions;
         
@@ -147,9 +158,7 @@ contract Exchange {
         
         uint contractEthBalanceAfterSwap = K / (token.balanceOf(address(this)) - _amountERC20Token);
         uint ethToSend = address(this).balance - contractEthBalanceAfterSwap;
-        
         return ethToSend;
-        
     }
 
 
@@ -158,6 +167,8 @@ contract Exchange {
         owner.transfer(msg.value);
 
         uint ERC20TokenToSend = token.balanceOf(address(this)) - (K / address(this).balance);
+
+        // token.approve(msg.sender, ERC20TokenToSend);
 
         token.transfer(msg.sender, ERC20TokenToSend);
 
