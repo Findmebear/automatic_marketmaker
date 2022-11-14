@@ -28,10 +28,7 @@ contract Exchange {
     
     uint K;
 
-    address payable public owner;
-
     constructor(address token_address) {
-        owner = payable(msg.sender);
         TOKEN_ADDRESS = token_address;
         token = IERC20(token_address);
         balance_address = address(this).balance;
@@ -46,8 +43,9 @@ contract Exchange {
 
     function provideLiquidity(uint _amountERC20Token) public payable returns (uint) {
 
-        token.transferFrom(msg.sender, address(this), _amountERC20Token); // transfer ERC20 token to this contract
-        owner.transfer(msg.value); // transfer the ETH to the contract
+        require(msg.value > 0, "You must send ETH to provide liquidity");
+        require(_amountERC20Token > 0, "You must send ERC20 tokens to provide liquidity");
+        require(token.transferFrom(msg.sender, address(this), _amountERC20Token), "You must approve this contract to spend your ERC20 tokens");
 
         balance_address = address(this).balance;
         balance_token = token.balanceOf(address(this));
@@ -69,7 +67,7 @@ contract Exchange {
         // update K
         K = address(this).balance * token.balanceOf(address(this));
 
-        emit LiquidityProvided(_amountERC20Token, msg.value ,currentLiquidityPositions);
+        emit LiquidityProvided(_amountERC20Token, msg.value, currentLiquidityPositions);
         
         return currentLiquidityPositions;
         
@@ -77,13 +75,22 @@ contract Exchange {
 
 
     function estimateEthToProvide(uint _amountERC20Token) public view returns (uint) {
+
+        require(_amountERC20Token > 0, "You must send ERC20 tokens to provide liquidity");
+        require(token.balanceOf(address(this)) > 0, "There is no liquidity in the pool");
+        
         //  amountEth = contractEthBalance * amountERC20Token / contractERC20TokenBalance) - FORMULA
         uint amountEth = address(this).balance * _amountERC20Token / token.balanceOf(address(this));
         return amountEth;
+
     }
 
 
     function estimateERC20TokenToProvide(uint _amountEth) public view returns (uint) {
+
+        require(_amountEth > 0, "You must send ETH to provide liquidity");
+        require(address(this).balance > 0, "There is no liquidity in the pool");
+        
         // amountERC20 = contractERC20TokenBalance * amountEth/contractEthBalance) - FORMULA
         uint amountERC20 = token.balanceOf(address(this)) *  _amountEth / address(this).balance;
         return amountERC20;
@@ -92,6 +99,8 @@ contract Exchange {
 
 
     function getMyLiquidityPositions() public view returns (uint) {
+
+        require(liquidityPositions[msg.sender] > 0, "You have no liquidity positions");
         
         return liquidityPositions[msg.sender];
         
@@ -99,6 +108,9 @@ contract Exchange {
 
 
     function withdrawLiquidity(uint _liquidityPositionsToBurn) public returns (uint, uint) {
+
+        require(_liquidityPositionsToBurn > 0, "You must burn some liquidity positions");
+
         // amountEthToSend = liquidityPositionsToBurn*contractEthBalance / totalLiquidityPositions - FORMULA
         // amountERC20ToSend = liquidityPositionsToBurn * contractERC20TokenBalance / totalLiquidityPositions - FORMULA
 
@@ -132,16 +144,20 @@ contract Exchange {
 
 
     function swapForEth(uint _amountERC20Token) public returns (uint) {
+
+        require(_amountERC20Token > 0, "You must send ERC20 tokens to swap for ETH");
+        require(token.balanceOf(address(this)) > 0, "There is no liquidity in the pool");
+
         /* 
         FORMULA: ethToSend = contractEthBalance - contractEthBalanceAfterSwap
         where contractEthBalanceAfterSwap = K / contractERC20TokenBalanceAfterSwap 
         */
 
-        uint contractEthBalanceAfterSwap = K / (token.balanceOf(address(this)) - _amountERC20Token);
+        uint contractEthBalanceAfterSwap = K / (token.balanceOf(address(this)) + _amountERC20Token);
         uint ethToSend = address(this).balance - contractEthBalanceAfterSwap;
         
         // transfer ERC20 token to this contract
-        token.transferFrom(msg.sender, address(this), _amountERC20Token);
+        require(token.transferFrom(msg.sender, address(this), _amountERC20Token), "You must approve this contract to spend your ERC20 tokens");
         
         // transfer ETH to the caller
         payable(msg.sender).transfer(ethToSend);
@@ -149,26 +165,31 @@ contract Exchange {
         emit SwapForEth(_amountERC20Token, ethToSend);
 
         return ethToSend;
+
     }
 
 
     function estimateSwapForEth(uint _amountERC20Token) public view returns (uint){
+
+        require(_amountERC20Token > 0, "You must send ERC20 tokens to swap for ETH");
+        require(token.balanceOf(address(this)) > 0, "There is no liquidity in the pool");
+
         // – estimates the amount of Ether to give caller based on amount ERC20 token caller wishes to swap
         // for when a user wants to know how much Ether to expect when calling swapForEth 
         
-        uint contractEthBalanceAfterSwap = K / (token.balanceOf(address(this)) - _amountERC20Token);
+        uint contractEthBalanceAfterSwap = K / (token.balanceOf(address(this)) + _amountERC20Token);
         uint ethToSend = address(this).balance - contractEthBalanceAfterSwap;
         return ethToSend;
+
     }
 
 
     function swapForERC20Token() payable public returns (uint){
-        
-        owner.transfer(msg.value);
 
-        uint ERC20TokenToSend = token.balanceOf(address(this)) - (K / address(this).balance);
+        require(msg.value > 0, "You must send ETH to swap for ERC20 tokens");
+        require(address(this).balance > 0, "There is no liquidity in the pool");
 
-        // token.approve(msg.sender, ERC20TokenToSend);
+        uint ERC20TokenToSend = token.balanceOf(address(this)) - (K / (address(this).balance + msg.value));
 
         token.transfer(msg.sender, ERC20TokenToSend);
 
@@ -180,12 +201,16 @@ contract Exchange {
 
 
     function estimateSwapForERC20Token(uint _amountEth) public view returns (uint) {
+
+        require(_amountEth > 0, "You must send ETH to swap for ERC20 tokens");
+        require(address(this).balance > 0, "There is no liquidity in the pool");
+        
         /*– estimates the amount of ERC20 token to give caller based on amount Ether caller wishes to
         swap for when a user wants to know how many ERC-20 tokens to expect when calling swapForERC20Token */
         // ERC20TokenToSend = contractERC20TokenBalance - contractERC20TokenBalanceAfterSwap
         // where contractERC20TokenBalanceAfterSwap = K /contractEthBalanceAfterSwap
 
-        uint contractERC20TokenBalanceAfterSwap = K / (address(this).balance - _amountEth);
+        uint contractERC20TokenBalanceAfterSwap = K / (address(this).balance + _amountEth);
 
         uint ERC20TokenToSend = token.balanceOf(address(this)) - contractERC20TokenBalanceAfterSwap;
 
